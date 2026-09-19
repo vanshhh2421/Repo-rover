@@ -1,0 +1,9 @@
+@echo off
+echo Starting Python Worker...
+start cmd /k ".\.venv\Scripts\python.exe -m uvicorn app.worker_main:app --port 8000 --reload"
+
+echo Starting Node.js Orchestrator...
+start cmd /k "cd orchestrator && npm run dev"
+
+echo Starting Frontend...
+start cmd /k "cd frontend && npm run dev"

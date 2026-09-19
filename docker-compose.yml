@@ -1,0 +1,109 @@
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: reporover-neo4j
+    ports:
+      - "7687:7687"
+      - "7474:7474"
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7474/ > /dev/null 2>&1 || cypher-shell -u neo4j -p password123 'RETURN 1' > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 40s
+
+  mongodb:
+    image: mongo:7
+    container_name: reporover-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  python-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: reporover-python-worker
+    ports:
+      - "8000:8000"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password123
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-llama-3.3-70b-versatile}
+      - EMBED_MODEL=${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      - CHROMA_DIR=/.chroma
+      - WORK_DIR=/.work
+    volumes:
+      - chroma_data:/.chroma
+      - work_data:/.work
+      - ${REPO_MOUNT:-.}:/repos
+      - ./app:/app/app
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    container_name: reporover-orchestrator
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - MONGO_URI=mongodb://mongodb:27017/reporover
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password123
+      - PYTHON_WORKER_URL=http://python-worker:8000
+      - WORK_DIR=/.work
+    volumes:
+      - ${REPO_MOUNT:-.}:/repos
+      - work_data:/.work
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      python-worker:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: reporover-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_ORCHESTRATOR_URL=http://localhost:5000
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  mongodb_data:
+  chroma_data:
+  work_data:

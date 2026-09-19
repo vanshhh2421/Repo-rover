@@ -1,0 +1,12 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY orchestrator/package*.json ./
+RUN npm install
+
+COPY orchestrator/ .
+
+EXPOSE 5000
+
+CMD ["node", "src/server.js"]
